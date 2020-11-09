@@ -11,8 +11,7 @@
 */
 !DataSets
 !.gitignore
-!train.txt
-!dev.txt 
-!test.txt 
-!MyUtils.py 
+!data/raw/train.txt 
+!data/raw/test.txt 
+!fine_tune_predict.py
 !README.md 
