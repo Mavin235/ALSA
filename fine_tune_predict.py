@@ -7,17 +7,15 @@ import logging
 import random
 
 from pytorch_transformers import BertConfig, BertForSequenceClassification, BertTokenizer
+        
+def train():
+    pass 
 
-class bert:
-    
-    def __init__(self):
-        pass 
+def predict():
+    pass 
 
-    def train(self):
-        pass 
-
-    def predict(self):
-        pass 
+def load_data():
+    pass
 
 def fix_seed(args):
     random.seed(args.seed)
@@ -46,6 +44,8 @@ def main():
                         help="Random seed for initialization")
     parser.add_argument("--train", action="store_true", 
                         help="Train (fine-tune) the model.")
+    parser.add_argument("--predict", action="store_true", 
+                        help="Use the model to predict.")
     parser.add_argument("--overwrite_output", action="store_true", 
                         help="Overwrite the output files")                        
 
@@ -69,7 +69,7 @@ def main():
     tokenizer = BertTokenizer.from_pretrained(pretrained_model_name_or_path=args.model_dir)
     model = BertForSequenceClassification.from_pretrained(args.model_dir, from_tf=bool('.ckpt' in args.model_dir), config=config)
 
-    
+
     # Train
     if args.train:
         pass 
