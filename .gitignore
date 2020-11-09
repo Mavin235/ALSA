@@ -8,8 +8,6 @@
 #Results/
 #__pycache__/
 *.*
-*/
-!DataSets
 !.gitignore
 !data/raw/train.txt 
 !data/raw/test.txt 
