@@ -2,23 +2,17 @@ import argparse
 from tokenize import Bracket
 import numpy as np 
 import os 
-import logging
 import random
 
 import torch
-from pytorch_transformers.tokenization_bert import BertTokenizer  
 from pytorch_transformers import BertConfig, BertForSequenceClassification, BertTokenizer
-from torch import dtype
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 from pytorch_transformers import AdamW, WarmupLinearSchedule
 
-from tensorboardX import SummaryWriter
-from tqdm import tnrange
-from process_data import transfer_to_features
+from process_data import transfer_to_features, convert_label_id_back, BERT_label_id_dic
 from tqdm import tqdm, trange
 
-def train(args, train_dataset, model, tokenizer):
-    #tb_writer = SummaryWriter()
+def train(args, train_dataset, model):
     train_sampler = RandomSampler(train_dataset)
     train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size)
 
@@ -79,7 +73,7 @@ def train(args, train_dataset, model, tokenizer):
                         os.makedirs(checkpoint_path)
                     model_to_save = model.module if hasattr(model, 'module') else model
                     model_to_save.save_pretrained(checkpoint_path)
-                    torch.save(args, os.path.join(checkpoint_path, 'training_args.bin'))
+                    torch.save(args, os.path.join(checkpoint_path, 'training_args.bin'), _use_new_zipfile_serialization=False)
             
             if args.max_steps > 0 and global_step > args.max_steps:
                 epoch_iterator.close()
@@ -89,7 +83,7 @@ def train(args, train_dataset, model, tokenizer):
             break
     return global_step, train_loss / global_step
 
-def predict(args, test_dataset, model, tokenizer):
+def predict(args, test_dataset, model):
     if not os.path.exists(args.predict_output_dir):
         os.makedirs(args.predict_output_dir)
     
@@ -98,15 +92,13 @@ def predict(args, test_dataset, model, tokenizer):
 
     print("*********** Predict ***********")
     print("\tExamples num: %d"%(len(test_dataset)))
-    print("\tBatch size: %d"%(args.test_batch_size))
+    print("\tBatch size: %d"%(args.predict_batch_size))
 
-    predcit_loss = 0.0
-    global_step = 0
-    results = None 
-    out_label_ids = None 
+    results = None
     for batch in tqdm(predict_dataloader, desc="Predict"):
+    #for batch in predict_dataloader:
         model.eval()
-        batch = tuple(t.to(args.device) for t in batch)
+        batch = tuple(ex.to(args.device) for ex in batch)
 
         with torch.no_grad(): #因为是用模型来预测, 所以此时不需要计算和更新梯度
             inputs = {'input_ids':      batch[0],
@@ -114,23 +106,23 @@ def predict(args, test_dataset, model, tokenizer):
                       'token_type_ids': batch[2], #segment_ids
                       'labels':         batch[3]}
             outputs = model(**inputs)
-            loss, logits = outputs[:2]
-            predcit_loss += loss.mean().item()
-        global_step += 1
+            logits = outputs[1]
         if results is None:
             results = logits.detach().cpu().numpy()
-            out_label_ids = inputs['label_ids'].detach().cpu().numpy()
         else:
             results = np.append(results, logits.detach().cpu().numpy(), axis=0)
-            out_label_ids = np.append(out_label_ids, inputs['label_ids'].detach().cpu().numpy(), axis=0)
     
-    predcit_loss /= global_step
+    results = np.argmax(results, axis=1)
+    results = convert_label_id_back(results)
+    np.savetxt(args.predict_output_dir + "result.txt", results, fmt="%d")
+    
     
         
 
 def load_data(args, tokenizer):
     if not os.path.exists(args.output_feature_dir):
-        os.mkdir(args.output_feature_dir)
+        os.makedirs(args.output_feature_dir)
+    
     if not os.listdir(args.output_feature_dir):
         train_features, tokenized_train_examples, test_features, tokenized_test_examples \
                                                     = transfer_to_features(args, tokenizer)
@@ -141,10 +133,12 @@ def load_data(args, tokenizer):
         np.save(os.path.join(args.output_feature_dir, "cached_test_tokens.npy"), np.array(tokenized_test_examples), allow_pickle=True)
 
     else:
+        # 如果处理后的数据集已经存在, 就直接读取
         train_features = list(np.load(os.path.join(args.output_feature_dir, "cached_train.npy"), allow_pickle=True))
         test_features = list(np.load(os.path.join(args.output_feature_dir, "cached_test.npy"), allow_pickle=True))
         #tokenized_train_examples = list(np.load(os.path.join(args.output_feature_dir, "cached_train_tokens.npy"), allow_pickle=True))
         #tokenized_test_examples = list(np.load(os.path.join(args.output_feature_dir, "cached_test_tokens.npy"), allow_pickle=True))
+        pass 
     
     #for i in range(9):
         #print("*** Example ***")
@@ -163,6 +157,10 @@ def load_data(args, tokenizer):
                                  torch.tensor([feature.input_masks for feature in test_features], dtype=torch.long), 
                                  torch.tensor([feature.segment_ids for feature in test_features], dtype=torch.long),
                                  torch.tensor([feature.label_id for feature in test_features], dtype=torch.long))
+    #train_dataset = torch.load(os.path.join(args.output_feature_dir, "cached_train_tensor"))
+    #test_dataset = torch.load(os.path.join(args.output_feature_dir, "cached_test_tensor"))
+    #torch.save(train_dataset, os.path.join(args.output_feature_dir, "cached_train_tensor"))
+    #torch.save(test_dataset, os.path.join(args.output_feature_dir, "cached_test_tensor"))
     return train_dataset, test_dataset
 
 def fix_seed(args):
@@ -196,7 +194,7 @@ def main():
                         help="Batch size when predicting")
     parser.add_argument("--max_seq_len", default=128, type=int,
                         help="The maximum total input sequence length after tokenization.")
-    parser.add_argument("--save_steps", default=50, type=int, 
+    parser.add_argument("--save_steps", default=200, type=int, 
                         help="Save checkpoint every given steps")
     parser.add_argument("--learning_rate", default=5e-5, type=float,
                         help="The initial learning rate for Adam.")
@@ -239,7 +237,7 @@ def main():
     fix_seed(args)
 
     # Load pre-trained model and dataset
-    config = BertConfig.from_pretrained(pretrained_model_name_or_path=args.model_dir)
+    config = BertConfig.from_pretrained(pretrained_model_name_or_path=args.model_dir, num_labels=len(BERT_label_id_dic))
     tokenizer = BertTokenizer.from_pretrained(pretrained_model_name_or_path=args.model_dir)
     model = BertForSequenceClassification.from_pretrained(args.model_dir, from_tf=bool('.ckpt' in args.model_dir), config=config)
     train_dateset, test_dataset = load_data(args, tokenizer)
@@ -249,25 +247,25 @@ def main():
     # Train and save
     fine_tuned_model_path = None
     if args.train:
-        global_step, train_loss = train(args, train_dateset, model, tokenizer)
+        global_step, train_loss = train(args, train_dateset, model)
+
         fine_tuned_model_path = os.path.join(args.output_model_dir, "final")
         if not os.path.exists(fine_tuned_model_path):
             os.makedirs(fine_tuned_model_path)
         model_to_save = model.module if hasattr(model, 'module') else model 
         model_to_save.save_pretrained(fine_tuned_model_path)
         tokenizer.save_pretrained(fine_tuned_model_path)
-        torch.save(args, os.path.join(fine_tuned_model_path, 'train_args.bin'))
+        torch.save(args, os.path.join(fine_tuned_model_path, 'train_args.bin'), _use_new_zipfile_serialization=False)
         
 
     # Predict
     if args.predict:
-        #if args.train:
-        #    config = BertConfig.from_pretrained(pretrained_model_name_or_path=fine_tuned_model_path)
-        #    model = BertForSequenceClassification.from_pretrained(fine_tuned_model_path,  from_tf=bool('.ckpt' in args.model_dir), config=config)
-        #    tokenizer = BertTokenizer.from_pretrained(fine_tuned_model_path)
-        #    model.to(args.device)
-        #predict()
-        pass
+        if args.train:
+            config = BertConfig.from_pretrained(pretrained_model_name_or_path=fine_tuned_model_path, num_labels=len(BERT_label_id_dic))
+            model = BertForSequenceClassification.from_pretrained(fine_tuned_model_path,  from_tf=bool('.ckpt' in args.model_dir), config=config)
+            tokenizer = BertTokenizer.from_pretrained(fine_tuned_model_path)
+            model.to(args.device)
+        predict(args, test_dataset, model)
 
 
 
