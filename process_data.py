@@ -40,8 +40,7 @@ def convert_label_id_back(bert_results):
     return bert_results
 
 def transfer_to_examples(raw_data_dir):
-    train_examples = []
-    test_examples = []
+    train_examples, test_examples = [], []
 
     #print(os.listdir(raw_data_dir))
     for filename in os.listdir(raw_data_dir):
@@ -88,7 +87,7 @@ def transfer_to_examples(raw_data_dir):
     return train_examples, test_examples
 
 def transfer_to_features(args, tokenizer):
-    train_examples, test_examples = transfer_to_examples(args.raw_data_dir)
+    train_examples, test_examples = transfer_to_examples(args.data_dir)
     train_features, test_features = [], []
     tokenized_train_examples, tokenized_test_examples = [], []
 

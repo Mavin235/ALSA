@@ -24,6 +24,7 @@ def train(args, train_dataset, model):
     else:
         total_opt_steps = len(train_dataloader) // args.gradient_accumulation_steps *  args.train_epoch_num
 
+    # 
     no_decay = ['bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
         {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)], 'weight_decay': args.weight_decay},
@@ -49,7 +50,8 @@ def train(args, train_dataset, model):
     for _ in train_iterator:
         epoch_iterator = tqdm(train_dataloader, desc="Iteration")
         for step, batch in enumerate(epoch_iterator):
-            batch = tuple(t.to(args.device) for t in batch)
+            batch = [ex.to(args.device) for ex in batch]
+
             inputs = {'input_ids':      batch[0],
                       'attention_mask': batch[1],
                       'token_type_ids': batch[2], #segment_ids
@@ -58,14 +60,18 @@ def train(args, train_dataset, model):
             loss = outputs[0]
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
+            
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm) #截断梯度, 防止梯度爆炸
+            
             train_loss += loss.item()
             if (step + 1) % args.gradient_accumulation_steps == 0:
-                #这里的顺序注意一下
+                # 当达到设定的累积梯度的step数时, 更新梯度, 学习率, 然后将累积的梯度置零
+
+                #根据WARNING信息, 这二者的顺序在目前的pytorch中需要按如下来写
                 optimizer.step() #更新梯度
                 scheduler.step() #更新学习率
-                model.zero_grad()
+                model.zero_grad() 
                 global_step += 1
 
                 if args.save_steps > 0 and global_step % args.save_steps == 0:
@@ -78,11 +84,14 @@ def train(args, train_dataset, model):
                     torch.save(args, os.path.join(checkpoint_path, 'training_args.bin'), _use_new_zipfile_serialization=False)
             
             if args.max_steps > 0 and global_step > args.max_steps:
+                # 达到最大step数时, 停止迭代
                 epoch_iterator.close()
                 break
         if args.max_steps > 0 and global_step > args.max_steps:
+            # 达到最大step数时, 停止迭代
             train_iterator.close()
             break
+
     return global_step, train_loss / global_step
 
 def predict(args, test_dataset, model):
@@ -98,10 +107,9 @@ def predict(args, test_dataset, model):
 
     results = None
     for batch in tqdm(predict_dataloader, desc="Predict"):
-    #for batch in predict_dataloader:
         model.eval()
-        batch = list(ex.to(args.device) for ex in batch)
-        #print(batch)
+        batch = [ex.to(args.device) for ex in batch]
+        
         with torch.no_grad(): #因为是用模型来预测, 所以此时不需要计算和更新梯度
             inputs = {'input_ids':      batch[0],
                       'attention_mask': batch[1],
@@ -113,51 +121,52 @@ def predict(args, test_dataset, model):
             results = logits.detach().cpu().numpy()
         else:
             results = np.append(results, logits.detach().cpu().numpy(), axis=0)
-        break
     
     results = np.argmax(results, axis=1)
     results = convert_label_id_back(results)
+    # 将输出结果保存
     np.savetxt(args.predict_output_dir + "result.txt", results, fmt="%d")
 
 def load_data(args, tokenizer):
-    if not os.path.exists(args.output_feature_dir):
-        os.makedirs(args.output_feature_dir)
+    transformed_data_dir = os.path.join(args.data_dir, "transformed/")
+    if not os.path.exists(transformed_data_dir):
+        os.makedirs(transformed_data_dir)
     
-    if not os.listdir(args.output_feature_dir): 
+    if not os.listdir(transformed_data_dir): 
         # 如果路径下还没有文件
-        train_features, tokenized_train_examples, test_features, tokenized_test_examples \
-                                                    = transfer_to_features(args, tokenizer)
+        train_features, tokenized_train_examples, test_features, tokenized_test_examples = transfer_to_features(args, tokenizer)
         # 将用预训练模型分词后的句子结果保存
-        np.save(os.path.join(args.output_feature_dir, "cached_train_tokens.npy"), np.array(tokenized_train_examples), allow_pickle=True)
-        np.save(os.path.join(args.output_feature_dir, "cached_test_tokens.npy"), np.array(tokenized_test_examples), allow_pickle=True)
+        np.save(os.path.join(transformed_data_dir, "cached_train_tokens.npy"), np.array(tokenized_train_examples), allow_pickle=True)
+        np.save(os.path.join(transformed_data_dir, "cached_test_tokens.npy"), np.array(tokenized_test_examples), allow_pickle=True)
         
         # 用 numpy 存储调整后的数据集 (数组, 元素类型为Feature类)
-        #np.save(os.path.join(args.output_feature_dir, "cached_train.npy"), np.array(train_features), allow_pickle=True)
-        #np.save(os.path.join(args.output_feature_dir, "cached_test.npy"), np.array(test_features), allow_pickle=True)   
+        #np.save(os.path.join(transformed_data_dir, "cached_train.npy"), np.array(train_features), allow_pickle=True)
+        #np.save(os.path.join(transformed_data_dir, "cached_test.npy"), np.array(test_features), allow_pickle=True)   
 
+        # 将转换后的数据进一步转换为tensor
         train_dataset = TensorDataset(torch.tensor([feature.input_ids for feature in train_features], dtype=torch.long),
-                                  torch.tensor([feature.input_masks for feature in train_features], dtype=torch.long), 
-                                  torch.tensor([feature.segment_ids for feature in train_features], dtype=torch.long),
-                                  torch.tensor([feature.label_id for feature in train_features], dtype=torch.long))
+                                      torch.tensor([feature.input_masks for feature in train_features], dtype=torch.long), 
+                                      torch.tensor([feature.segment_ids for feature in train_features], dtype=torch.long),
+                                      torch.tensor([feature.label_id for feature in train_features], dtype=torch.long))
 
         test_dataset = TensorDataset(torch.tensor([feature.input_ids for feature in test_features], dtype=torch.long),
-                                    torch.tensor([feature.input_masks for feature in test_features], dtype=torch.long), 
-                                    torch.tensor([feature.segment_ids for feature in test_features], dtype=torch.long),
-                                    torch.tensor([feature.label_id for feature in test_features], dtype=torch.long))
+                                     torch.tensor([feature.input_masks for feature in test_features], dtype=torch.long), 
+                                     torch.tensor([feature.segment_ids for feature in test_features], dtype=torch.long),
+                                     torch.tensor([feature.label_id for feature in test_features], dtype=torch.long))
         
         # 直接保存tensor
-        torch.save(train_dataset, os.path.join(args.output_feature_dir, "cached_train_tensor"))
-        torch.save(test_dataset, os.path.join(args.output_feature_dir, "cached_test_tensor"))
+        torch.save(train_dataset, os.path.join(transformed_data_dir, "cached_train_tensor"))
+        torch.save(test_dataset, os.path.join(transformed_data_dir, "cached_test_tensor"))
         
 
     else:
         # 如果处理后的数据集已经存在, 就直接读取
 
         # 读取 numpy 保存的文件, 后续需要用TensorDataSet 转换为tensor
-        #train_features = list(np.load(os.path.join(args.output_feature_dir, "cached_train.npy"), allow_pickle=True))
-        #test_features = list(np.load(os.path.join(args.output_feature_dir, "cached_test.npy"), allow_pickle=True))
-        #tokenized_train_examples = list(np.load(os.path.join(args.output_feature_dir, "cached_train_tokens.npy"), allow_pickle=True))
-        #tokenized_test_examples = list(np.load(os.path.join(args.output_feature_dir, "cached_test_tokens.npy"), allow_pickle=True))
+        #train_features = list(np.load(os.path.join(transformed_data_dir, "cached_train.npy"), allow_pickle=True))
+        #test_features = list(np.load(os.path.join(transformed_data_dir, "cached_test.npy"), allow_pickle=True))
+        #tokenized_train_examples = list(np.load(os.path.join(transformed_data_dir, "cached_train_tokens.npy"), allow_pickle=True))
+        #tokenized_test_examples = list(np.load(os.path.join(transformed_data_dir, "cached_test_tokens.npy"), allow_pickle=True))
         #train_dataset = TensorDataset(torch.tensor([feature.input_ids for feature in train_features], dtype=torch.long),
         #                          torch.tensor([feature.input_masks for feature in train_features], dtype=torch.long), 
         #                          torch.tensor([feature.segment_ids for feature in train_features], dtype=torch.long),
@@ -168,8 +177,8 @@ def load_data(args, tokenizer):
         #                            torch.tensor([feature.label_id for feature in test_features], dtype=torch.long))
 
         # 读取保存的tensor
-        train_dataset = torch.load(os.path.join(args.output_feature_dir, "cached_train_tensor"))
-        test_dataset = torch.load(os.path.join(args.output_feature_dir, "cached_test_tensor"))
+        train_dataset = torch.load(os.path.join(transformed_data_dir, "cached_train_tensor"))
+        test_dataset = torch.load(os.path.join(transformed_data_dir, "cached_test_tensor"))
     
     #for i in range(9):
         #print("*** Example ***")
