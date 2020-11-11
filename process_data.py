@@ -1,26 +1,21 @@
-import parser
-import numpy as np 
-import argparse
 import os 
-import logging 
 
 # 作业给的数据集中情感极性的id
 origin_label_id_dic = {"-1": "NEG", 
                        "0":  "NEU",
-                       "1":  "POS", 
-                       "-5": "TEST"}
+                       "1":  "POS",}
 
 # BERT模型的情感极性的id
 BERT_label_id_dic = {"NEG": 1, 
                      "NEU": 2, 
-                     "POS": 0, 
-                     "TEST": -5} #由于训练集未给出极性, 而BERT模型必须需要一个极性, 
-                                 #所以在创建训练集的example时, 用 -5 当作它的极性
+                     "POS": 0,} 
+
 class Example:
     def __init__(self, example):
         self.sentence_A = example[0]
         self.sentence_B = example[1]
         self.label_id = convert_label_id(example[2])
+
 class Feature:
     def __init__(self, input_ids, input_masks, segment_ids, label_id):
         self.input_ids = input_ids
@@ -33,6 +28,16 @@ def convert_label_id(label_id_str):
     将作业的数据集的情感极性id转换为BERT模型的情感极性的id
     """
     return BERT_label_id_dic[origin_label_id_dic[label_id_str]]
+
+def convert_label_id_back(bert_results):
+    """
+    将BERT预测出的情感极性id转换为作业给出的情感极性的id
+    需要注意转换的顺序, 否则会出现错误
+    """
+    bert_results[bert_results == 1] = -1
+    bert_results[bert_results == 0] = 1
+    bert_results[bert_results == 2] = 0
+    return bert_results
 
 def transfer_to_examples(raw_data_dir):
     train_examples = []
@@ -68,7 +73,10 @@ def transfer_to_examples(raw_data_dir):
                     example.append(line)
                     if cnt % 2 == 0:
                         example[0] = example[0].replace("$T$", example[1], 1)
-                        example.append("-5")
+                        # 由于BERT模型的输入必须要有一个label_id, 所以把所有
+                        # 测试集中样本的label_id都设成 "0" (neual), 在使用中
+                        # 不会用到
+                        example.append("0") 
                         test_examples.append(Example(example))
                         example = []
                     line = f.readline().strip()
@@ -81,10 +89,8 @@ def transfer_to_examples(raw_data_dir):
 
 def transfer_to_features(args, tokenizer):
     train_examples, test_examples = transfer_to_examples(args.raw_data_dir)
-    train_features = []
-    test_features = []
-    tokenized_train_examples = []
-    tokenized_test_examples = []
+    train_features, test_features = [], []
+    tokenized_train_examples, tokenized_test_examples = [], []
 
     for example in train_examples:
         input_ids, input_masks, segment_ids, tokens_whole = tokenize(example, tokenizer, args.max_seq_len)
@@ -119,8 +125,9 @@ def tokenize(example, tokenizer, max_seq_len):
 
     input_masks = [1] * len(input_ids)
     padding_len = max_seq_len - len(input_ids)
-    # 假定不会超过最长串
-    assert padding_len > 0
+
+    assert padding_len > 0 # 假定不会超过最长串
+
     padding = [0] * padding_len
     # 在剩余的位置补上 0 (mask 和 id 都是)
     input_ids = input_ids + padding
@@ -134,4 +141,5 @@ def tokenize(example, tokenizer, max_seq_len):
     return input_ids, input_masks, segment_ids, tokens_whole
 
 if __name__ == "__main__":
-    transfer_to_examples("./data/raw/")
+    #transfer_to_examples("./data/raw/")
+    print(len(BERT_label_id_dic))

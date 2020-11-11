@@ -8,9 +8,10 @@
 #Results/
 #__pycache__/
 *.*
+data/dataset/transformed/
 !.gitignore
-!data/raw/train.txt 
-!data/raw/test.txt 
+!data/dataset/train.txt 
+!data/dataset/test.txt 
 !fine_tune_predict.py
 !process_data.py
 !README.md 
