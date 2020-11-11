@@ -38,6 +38,7 @@ def transfer_to_examples(raw_data_dir):
     train_examples = []
     test_examples = []
 
+    #print(os.listdir(raw_data_dir))
     for filename in os.listdir(raw_data_dir):
         filepath = os.path.join(raw_data_dir, filename)
         if "train" in filename:
@@ -75,7 +76,8 @@ def transfer_to_examples(raw_data_dir):
             #for i in range(10):
             #    print(test_examples[i].sentence_A, test_examples[i].sentence_B, 
             #            test_examples[i].label_id)
-        return train_examples, test_examples
+
+    return train_examples, test_examples
 
 def transfer_to_features(args, tokenizer):
     train_examples, test_examples = transfer_to_examples(args.raw_data_dir)
@@ -89,6 +91,7 @@ def transfer_to_features(args, tokenizer):
         train_features.append(Feature(input_ids, input_masks, segment_ids, example.label_id))
         tokenized_train_examples.append(" ".join([str(token) for token in tokens_whole]))
     
+    #print(train_features[0].label_id)
     for example in test_examples:
         input_ids, input_masks, segment_ids, tokens_whole = tokenize(example, tokenizer, args.max_seq_len)
         test_features.append(Feature(input_ids, input_masks, segment_ids, example.label_id))
@@ -120,9 +123,9 @@ def tokenize(example, tokenizer, max_seq_len):
     assert padding_len > 0
     padding = [0] * padding_len
     # 在剩余的位置补上 0 (mask 和 id 都是)
-    input_ids = padding + input_ids
-    input_masks = padding + input_masks
-    segment_ids = padding + segment_ids
+    input_ids = input_ids + padding
+    input_masks = input_masks + padding
+    segment_ids = segment_ids + padding
 
     assert len(input_ids) == max_seq_len
     assert len(input_masks) == max_seq_len
