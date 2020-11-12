@@ -79,8 +79,12 @@ def train(args, train_dataset, model):
                     checkpoint_path = os.path.join(args.output_model_dir, 'checkpoint-on-step-{}'.format(global_step))
                     if not os.path.exists(checkpoint_path):
                         os.makedirs(checkpoint_path)
-                    model.save_pretrained(checkpoint_path)
-                    torch.save(args, os.path.join(checkpoint_path, 'training_args.bin'), _use_new_zipfile_serialization=False)
+                    
+                    #model.save_pretrained(checkpoint_path)
+                    #torch.save(args, os.path.join(checkpoint_path, 'training_args.bin'))
+                    model.config.save_pretrained(checkpoint_path)
+                    torch.save(model.state_dict(), os.path.join(checkpoint_path, "pytorch_model.bin"), _use_new_zipfile_serialization=False)
+                    torch.save(args, os.path.join(checkpoint_path, 'train_args.bin'), _use_new_zipfile_serialization=False)
             
             if args.max_steps > 0 and global_step > args.max_steps:
                 # 达到最大step数时, 停止迭代
@@ -272,7 +276,14 @@ def main():
         fine_tuned_model_path = os.path.join(args.output_model_dir, "final")
         if not os.path.exists(fine_tuned_model_path):
             os.makedirs(fine_tuned_model_path) 
-        model.save_pretrained(fine_tuned_model_path)
+
+        #model.save_pretrained(fine_tuned_model_path)
+        #torch.save(args, os.path.join(fine_tuned_model_path, 'train_args.bin'))
+
+        # 如果在>=1.6版本的Pytor上训练, 然后要在<1.6版本的Pytorch上面
+        # 使用模型来预测, 则用如下的方式, 否则用上面的方式
+        model.config.save_pretrained(fine_tuned_model_path)
+        torch.save(model.state_dict(), os.path.join(fine_tuned_model_path, "pytorch_model.bin"), _use_new_zipfile_serialization=False)
         tokenizer.save_pretrained(fine_tuned_model_path)
         torch.save(args, os.path.join(fine_tuned_model_path, 'train_args.bin'), _use_new_zipfile_serialization=False)
         
