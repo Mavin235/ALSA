@@ -19,10 +19,10 @@ def train(args, train_dataset, model):
 
     if args.max_steps > 0:
         # 如果指定了最大的执行step , 则重新计算epoch_num
-        total_opt_steps = args.max_steps
+        total_train_steps = args.max_steps
         args.train_epoch_num = args.max_steps // (len(train_dataloader) // args.gradient_accumulation_steps) + 1
     else:
-        total_opt_steps = len(train_dataloader) // args.gradient_accumulation_steps *  args.train_epoch_num
+        total_train_steps = len(train_dataloader) // args.gradient_accumulation_steps *  args.train_epoch_num
 
     # 
     no_decay = ['bias', 'LayerNorm.weight']
@@ -31,8 +31,8 @@ def train(args, train_dataset, model):
         {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
     
-    optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_eps)
-    scheduler = WarmupLinearSchedule(optimizer, warmup_steps=args.warmup_steps, t_total=total_opt_steps)
+    optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.eps)
+    scheduler = WarmupLinearSchedule(optimizer, warmup_steps=args.warmup_steps, t_total=total_train_steps)
 
     print("*********** Train ***********")
     print("\tExamples num: %d"%(len(train_dataset)))
@@ -40,7 +40,7 @@ def train(args, train_dataset, model):
     print("\tBatch size: %d"%(args.train_batch_size))
     print("\tGradient accumulation steps: %d"%(args.gradient_accumulation_steps))
     print("\tTrain data loader num: %d"%(len(train_dataloader)))
-    print("\tTotol optimization steps: %d"%(total_opt_steps))
+    print("\tTotol optimization steps: %d"%(total_train_steps))
 
     global_step = 0
     train_loss = 0.0
@@ -134,14 +134,6 @@ def load_data(args, tokenizer):
     if not os.listdir(transformed_data_dir): 
         # 如果路径下还没有文件
         train_features, tokenized_train_examples, test_features, tokenized_test_examples = transfer_to_features(args, tokenizer)
-        # 将用预训练模型分词后的句子结果保存
-        np.save(os.path.join(transformed_data_dir, "cached_train_tokens.npy"), np.array(tokenized_train_examples), allow_pickle=True)
-        np.save(os.path.join(transformed_data_dir, "cached_test_tokens.npy"), np.array(tokenized_test_examples), allow_pickle=True)
-        
-        # 用 numpy 存储调整后的数据集 (数组, 元素类型为Feature类)
-        np.save(os.path.join(transformed_data_dir, "cached_train.npy"), np.array(train_features), allow_pickle=True)
-        np.save(os.path.join(transformed_data_dir, "cached_test.npy"), np.array(test_features), allow_pickle=True)   
-
         # 将转换后的数据进一步转换为tensor
         train_dataset = TensorDataset(torch.tensor([feature.input_ids for feature in train_features], dtype=torch.long),
                                       torch.tensor([feature.input_masks for feature in train_features], dtype=torch.long), 
@@ -156,16 +148,20 @@ def load_data(args, tokenizer):
         # 直接保存tensor
         torch.save(train_dataset, os.path.join(transformed_data_dir, "cached_train_tensor"))
         torch.save(test_dataset, os.path.join(transformed_data_dir, "cached_test_tensor"))
-        
 
+        # 用 numpy 存储调整后的数据集 (数组, 元素类型为Feature类)
+        np.save(os.path.join(transformed_data_dir, "cached_train.npy"), np.array(train_features), allow_pickle=True)
+        np.save(os.path.join(transformed_data_dir, "cached_test.npy"), np.array(test_features), allow_pickle=True)   
+
+        # 将用预训练模型分词后的句子结果保存
+        np.save(os.path.join(transformed_data_dir, "cached_train_tokens.npy"), np.array(tokenized_train_examples), allow_pickle=True)
+        np.save(os.path.join(transformed_data_dir, "cached_test_tokens.npy"), np.array(tokenized_test_examples), allow_pickle=True)
     else:
         # 如果处理后的数据集已经存在, 就直接读取
 
         # 读取 numpy 保存的文件, 后续需要用TensorDataSet 转换为tensor
         #train_features = list(np.load(os.path.join(transformed_data_dir, "cached_train.npy"), allow_pickle=True))
         #test_features = list(np.load(os.path.join(transformed_data_dir, "cached_test.npy"), allow_pickle=True))
-        #tokenized_train_examples = list(np.load(os.path.join(transformed_data_dir, "cached_train_tokens.npy"), allow_pickle=True))
-        #tokenized_test_examples = list(np.load(os.path.join(transformed_data_dir, "cached_test_tokens.npy"), allow_pickle=True))
         #train_dataset = TensorDataset(torch.tensor([feature.input_ids for feature in train_features], dtype=torch.long),
         #                          torch.tensor([feature.input_masks for feature in train_features], dtype=torch.long), 
         #                          torch.tensor([feature.segment_ids for feature in train_features], dtype=torch.long),
@@ -178,6 +174,10 @@ def load_data(args, tokenizer):
         # 读取保存的tensor
         train_dataset = torch.load(os.path.join(transformed_data_dir, "cached_train_tensor"))
         test_dataset = torch.load(os.path.join(transformed_data_dir, "cached_test_tensor"))
+
+        # 读取保存的分词后的句子, 用来测试是否正常保存
+        #tokenized_train_examples = list(np.load(os.path.join(transformed_data_dir, "cached_train_tokens.npy"), allow_pickle=True))
+        #tokenized_test_examples = list(np.load(os.path.join(transformed_data_dir, "cached_test_tokens.npy"), allow_pickle=True))
     
     #print_features(train_features, tokenized_train_examples, test_features, tokenized_test_examples, 9)
     
@@ -211,7 +211,7 @@ def main():
                         help="Steps to warm up.")
     parser.add_argument("--learning_rate", default=5e-5, type=float,
                         help="The initial learning rate for Adam.")
-    parser.add_argument("--adam_eps", default=1e-8, type=float,
+    parser.add_argument("--eps", default=1e-8, type=float,
                         help="Epsilon for Adam optimizer.")
     parser.add_argument("--weight_decay", default=0.0, type=float,
                         help="Weight deay if we apply some.")

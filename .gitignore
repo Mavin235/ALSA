@@ -16,3 +16,4 @@ data/dataset/transformed/
 !process_data.py
 !README.md 
 !run.sh
+!requirements.txt
