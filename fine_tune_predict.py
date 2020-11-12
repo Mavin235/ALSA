@@ -10,7 +10,7 @@ from pytorch_transformers import BertConfig, BertForSequenceClassification, Bert
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 from pytorch_transformers import AdamW, WarmupLinearSchedule
 
-from process_data import transfer_to_features, convert_label_id_back, BERT_label_id_dic
+from process_data import transfer_to_features, convert_label_id_back, print_features, BERT_label_id_dic
 from tqdm import tqdm, trange
 
 def train(args, train_dataset, model):
@@ -79,8 +79,7 @@ def train(args, train_dataset, model):
                     checkpoint_path = os.path.join(args.output_model_dir, 'checkpoint-on-step-{}'.format(global_step))
                     if not os.path.exists(checkpoint_path):
                         os.makedirs(checkpoint_path)
-                    model_to_save = model.module if hasattr(model, 'module') else model
-                    model_to_save.save_pretrained(checkpoint_path)
+                    model.save_pretrained(checkpoint_path)
                     torch.save(args, os.path.join(checkpoint_path, 'training_args.bin'), _use_new_zipfile_serialization=False)
             
             if args.max_steps > 0 and global_step > args.max_steps:
@@ -140,8 +139,8 @@ def load_data(args, tokenizer):
         np.save(os.path.join(transformed_data_dir, "cached_test_tokens.npy"), np.array(tokenized_test_examples), allow_pickle=True)
         
         # 用 numpy 存储调整后的数据集 (数组, 元素类型为Feature类)
-        #np.save(os.path.join(transformed_data_dir, "cached_train.npy"), np.array(train_features), allow_pickle=True)
-        #np.save(os.path.join(transformed_data_dir, "cached_test.npy"), np.array(test_features), allow_pickle=True)   
+        np.save(os.path.join(transformed_data_dir, "cached_train.npy"), np.array(train_features), allow_pickle=True)
+        np.save(os.path.join(transformed_data_dir, "cached_test.npy"), np.array(test_features), allow_pickle=True)   
 
         # 将转换后的数据进一步转换为tensor
         train_dataset = TensorDataset(torch.tensor([feature.input_ids for feature in train_features], dtype=torch.long),
@@ -180,13 +179,7 @@ def load_data(args, tokenizer):
         train_dataset = torch.load(os.path.join(transformed_data_dir, "cached_train_tensor"))
         test_dataset = torch.load(os.path.join(transformed_data_dir, "cached_test_tensor"))
     
-    #for i in range(9):
-        #print("*** Example ***")
-        #print("tokens: %s" % (tokenized_train_examples[i]))
-        #print("input_ids: %s" % (train_features[i].input_ids))
-        #print("input_masks: %s" % (train_features[i].input_masks))
-        #print("segment_ids: %s" % (train_features[i].segment_ids))
-        #print("label_id = %d)"% (train_features[i].label_id))
+    #print_features(train_features, tokenized_train_examples, test_features, tokenized_test_examples, 9)
     
     return train_dataset, test_dataset
 
