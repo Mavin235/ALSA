@@ -15,3 +15,4 @@ data/dataset/transformed/
 !fine_tune_predict.py
 !process_data.py
 !README.md 
+!run.sh
