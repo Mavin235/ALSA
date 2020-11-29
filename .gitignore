@@ -8,7 +8,7 @@
 #Results/
 #__pycache__/
 *.*
-data/dataset/transformed/
+*/
 !.gitignore
 !data/dataset/train.txt 
 !data/dataset/test.txt 
